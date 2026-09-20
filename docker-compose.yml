@@ -1,18 +1,18 @@
 services:
-  opensearch:
-    image: opensearchproject/opensearch:2
-    container_name: opensearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.2
+    container_name: elasticsearch
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-      - DISABLE_SECURITY_PLUGIN=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
     ulimits:
       memlock:
         soft: -1
         hard: -1
     volumes:
-      - opensearch-data:/usr/share/opensearch/data
+      - elasticsearch-data:/usr/share/elasticsearch/data
     ports:
       - "9200:9200"
     healthcheck:
@@ -21,16 +21,15 @@ services:
       timeout: 5s
       retries: 10
 
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2
-    container_name: opensearch-dashboards
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.10.2
+    container_name: kibana
     environment:
-      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
-      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
       - "5601:5601"
     depends_on:
-      opensearch:
+      elasticsearch:
         condition: service_healthy
 
   fluentd:
@@ -38,13 +37,13 @@ services:
       context: ./fluentd
     container_name: fluentd
     volumes:
-      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - ./fluentd/fluent.conf:/etc/td-agent/td-agent.conf:ro
     ports:
       - "24224:24224"
       - "24224:24224/udp"
     depends_on:
-      opensearch:
+      elasticsearch:
         condition: service_healthy
 
 volumes:
-  opensearch-data:
+  elasticsearch-data:
