@@ -32,32 +32,18 @@ services:
       elasticsearch:
         condition: service_healthy
 
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: nginx
-    ports:
-      - "8080:80"
-    volumes:
-      - nginx-logs:/var/log/nginx
-
   fluentd:
     build:
       context: ./fluentd
     container_name: fluentd
     volumes:
       - ./fluentd/fluent.conf:/etc/td-agent/td-agent.conf:ro
-      - nginx-logs:/var/log/nginx:ro
-      - fluentd-pos:/var/log/td-agent
     ports:
       - "24224:24224"
       - "24224:24224/udp"
     depends_on:
       elasticsearch:
         condition: service_healthy
-      nginx:
-        condition: service_started
 
 volumes:
   elasticsearch-data:
-  nginx-logs:
-  fluentd-pos:
