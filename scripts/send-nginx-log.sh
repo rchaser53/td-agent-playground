@@ -2,17 +2,16 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <nginx-log-file> [tag]" >&2
-  echo "Example: $0 /var/log/nginx/access.log nginx.access" >&2
+  echo "Usage: $0 <nginx-log-file>" >&2
+  echo "Example: $0 /path/to/access.log" >&2
 }
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
+if [[ $# -ne 1 ]]; then
   usage
   exit 1
 fi
 
 LOG_FILE="$1"
-TAG="${2:-nginx.access}"
 
 if [[ ! -f "$LOG_FILE" ]]; then
   echo "Error: log file not found: $LOG_FILE" >&2
@@ -24,10 +23,20 @@ if [[ ! -r "$LOG_FILE" ]]; then
   exit 1
 fi
 
-# Send every existing line in the specified nginx log file.
-# fluent-cat reads one JSON object per line, so wrap each raw nginx log line
-# in a JSON object without changing its contents.
-python3 - "$LOG_FILE" <<'PY' | /opt/td-agent/bin/fluent-cat "$TAG"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Error: docker command not found" >&2
+  exit 1
+fi
+
+if ! docker compose ps --status running fluentd 2>/dev/null | grep -q fluentd; then
+  echo "Error: fluentd service is not running. Run: docker compose up -d --build" >&2
+  exit 1
+fi
+
+LINE_COUNT=$(wc -l < "$LOG_FILE" | tr -d ' ')
+echo "Sending $LINE_COUNT lines from $LOG_FILE ..."
+
+python3 - "$LOG_FILE" <<'PY' | docker compose exec -T fluentd /opt/td-agent/bin/fluent-cat nginx.raw
 import json
 import sys
 
@@ -36,3 +45,7 @@ with open(path, "r", encoding="utf-8", errors="replace") as f:
     for line in f:
         print(json.dumps({"message": line.rstrip("\n")}, ensure_ascii=False))
 PY
+
+echo "Sent $LINE_COUNT lines with tag nginx.raw."
+echo "Wait a few seconds, then check:"
+echo "  curl 'http://localhost:9200/nginx-access-*/_count?pretty'"
