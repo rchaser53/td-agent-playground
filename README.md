@@ -2,15 +2,20 @@
 
 td-agent から Elasticsearch へログを送信する Docker Compose のサンプル環境です。
 
+nginx のアクセスログを td-agent で tail し、Elasticsearch 7.10.2 に保存する構成も含まれています。
+
 ## 構成
 
 | サービス | バージョン | 接続先 |
 | --- | --- | --- |
 | Elasticsearch | 7.10.2 | http://localhost:9200 |
 | Kibana | 7.10.2 | http://localhost:5601 |
+| nginx | 1.27 | http://localhost:8080 |
 | td-agent | 4.5.2 | Forward protocol: `24224/tcp`, `24224/udp` |
 
-Fluentd から送信されたログは、`td-agent-test-YYYY.MM.DD` 形式の Elasticsearch インデックスに保存されます。
+Fluentd の Forward 入力から送信されたログは、`td-agent-test-YYYY.MM.DD` 形式の Elasticsearch インデックスに保存されます。
+
+nginx のアクセスログは、`nginx-access-YYYY.MM.DD` 形式の Elasticsearch インデックスに保存されます。
 
 ## OpenSearch からの変更点
 
@@ -36,13 +41,14 @@ docker compose up -d --build
 docker compose ps
 ```
 
-`elasticsearch`、`kibana`、`fluentd` の 3 コンテナが起動していれば正常です。
+`elasticsearch`、`kibana`、`nginx`、`fluentd` の 4 コンテナが起動していれば正常です。
 
 ログを確認する場合:
 
 ```bash
 docker compose logs elasticsearch
 docker compose logs fluentd
+docker compose logs nginx
 docker compose logs kibana
 ```
 
@@ -69,6 +75,32 @@ docker compose up -d --build fluentd
 docker compose ps
 docker compose logs fluentd
 ```
+
+## nginx のアクセスログを Elasticsearch に送信
+
+nginx にアクセスしてログを発生させます。
+
+```bash
+curl http://localhost:8080/
+```
+
+td-agent は共有ボリューム上の `/var/log/nginx/access.log` を tail し、nginx 標準ログ形式としてパースします。
+
+バッファは約 1 秒ごとに flush されます。数秒待ってからインデックスを確認します。
+
+```bash
+curl 'http://localhost:9200/_cat/indices?v'
+```
+
+`nginx-access-YYYY.MM.DD` が表示されれば、Elasticsearch への送信に成功しています。
+
+送信した nginx ログの確認:
+
+```bash
+curl 'http://localhost:9200/nginx-access-*/_search?pretty'
+```
+
+検索結果の `_source` には、たとえば `remote`、`method`、`path`、`code` などの nginx アクセスログ由来フィールドが含まれます。
 
 ## Fluentd からテストログを送信
 
@@ -104,7 +136,7 @@ curl 'http://localhost:9200/td-agent-test-*/_search?pretty'
 
 ブラウザで http://localhost:5601 を開きます。
 
-ログを検索する場合は、Kibana で `td-agent-test-*` を対象とする data view を作成してください。
+nginx ログを検索する場合は `nginx-access-*`、Forward 入力のログを検索する場合は `td-agent-test-*` を対象とする data view を作成してください。
 
 ## 停止
 
@@ -114,7 +146,7 @@ curl 'http://localhost:9200/td-agent-test-*/_search?pretty'
 docker compose down
 ```
 
-Elasticsearch のデータも削除する場合は、次を実行します。
+Elasticsearch のデータやログ用ボリュームも削除する場合は、次を実行します。
 
 ```bash
 docker compose down -v
@@ -125,11 +157,9 @@ docker compose down -v
 ```bash
 docker compose up -d --build
 curl http://localhost:9200
-
-echo '{"message":"Hello Elasticsearch"}' | \
-  docker compose exec -T fluentd /opt/td-agent/bin/fluent-cat test.log
+curl http://localhost:8080/
 
 sleep 2
 curl 'http://localhost:9200/_cat/indices?v'
-curl 'http://localhost:9200/td-agent-test-*/_search?pretty'
+curl 'http://localhost:9200/nginx-access-*/_search?pretty'
 ```
