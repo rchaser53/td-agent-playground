@@ -2,7 +2,7 @@
 
 td-agent から Elasticsearch へログを送信する Docker Compose のサンプル環境です。
 
-nginx のアクセスログを td-agent で tail し、Elasticsearch 7.10.2 に保存する構成も含まれています。
+指定した nginx アクセスログファイルの全データを td-agent 経由で Elasticsearch 7.10.2 に送信するスクリプトも含まれています。
 
 ## 構成
 
@@ -41,7 +41,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-`elasticsearch`、`kibana`、`nginx`、`fluentd` の 4 コンテナが起動していれば正常です。
+`elasticsearch`、`kibana`、`fluentd` の 3 コンテナが起動していれば正常です。
 
 ログを確認する場合:
 
@@ -76,31 +76,37 @@ docker compose ps
 docker compose logs fluentd
 ```
 
-## nginx のアクセスログを Elasticsearch に送信
+## nginx のアクセスログファイルを Elasticsearch に送信
 
-nginx にアクセスしてログを発生させます。
-
-```bash
-curl http://localhost:8080/
-```
-
-td-agent は共有ボリューム上の `/var/log/nginx/access.log` を tail し、nginx 標準ログ形式としてパースします。
-
-バッファは約 1 秒ごとに flush されます。数秒待ってからインデックスを確認します。
+ホスト上の nginx アクセスログファイルを指定して、その時点でファイルに存在する全行を送信します。
 
 ```bash
-curl 'http://localhost:9200/_cat/indices?v'
+./scripts/send-nginx-log.sh /path/to/access.log
 ```
 
-`nginx-access-YYYY.MM.DD` が表示されれば、Elasticsearch への送信に成功しています。
+スクリプトは各行を Docker Compose の td-agent に渡します。td-agent は nginx 標準アクセスログ形式としてパースし、`nginx-access-YYYY.MM.DD` インデックスへ保存します。Mac 側に `fluent-cat` をインストールする必要はありません。
 
-送信した nginx ログの確認:
+送信件数はスクリプト実行時に表示されます。バッファの flush を待ってから Elasticsearch 側を確認します。
 
 ```bash
-curl 'http://localhost:9200/nginx-access-*/_search?pretty'
+curl 'http://localhost:9200/nginx-access-*/_count?pretty'
+curl 'http://localhost:9200/nginx-access-*/_search?pretty&size=5'
 ```
 
-検索結果の `_source` には、たとえば `remote`、`method`、`path`、`code` などの nginx アクセスログ由来フィールドが含まれます。
+インデックス一覧を確認する場合:
+
+```bash
+curl 'http://localhost:9200/_cat/indices/nginx-access-*?v'
+```
+
+Fluentd 側でパースエラーなどを確認する場合:
+
+```bash
+docker compose logs --tail=100 fluentd
+```
+
+> [!NOTE]
+> Docker 版 nginx の `/var/log/nginx/access.log` は `/dev/stdout` へのシンボリックリンクです。そのため、このサンプルでは Fluentd の `in_tail` でコンテナの `access.log` を直接監視せず、指定された通常のログファイルを Forward 入力へ送信します。
 
 ## Fluentd からテストログを送信
 
@@ -157,29 +163,10 @@ docker compose down -v
 ```bash
 docker compose up -d --build
 curl http://localhost:9200
-curl http://localhost:8080/
+
+./scripts/send-nginx-log.sh /path/to/access.log
 
 sleep 2
-curl 'http://localhost:9200/_cat/indices?v'
-curl 'http://localhost:9200/nginx-access-*/_search?pretty'
+curl 'http://localhost:9200/_cat/indices/nginx-access-*?v'
+curl 'http://localhost:9200/nginx-access-*/_count?pretty'
 ```
-
-
-## 既存の nginx ログファイルを一括送信
-
-指定した nginx ログファイルに現在書かれている全ログを Fluentd の Forward 入力へ送信するスクリプトを用意しています。
-
-```bash
-docker compose cp /path/to/access.log fluentd:/tmp/access.log
-docker compose exec fluentd bash /workspace/scripts/send-nginx-log.sh /tmp/access.log
-```
-
-ホスト側からスクリプトを使う場合は、td-agent と同じ環境で `/opt/td-agent/bin/fluent-cat` が利用できる必要があります。
-
-第2引数で送信タグを指定できます。省略時は `nginx.access` です。
-
-```bash
-./scripts/send-nginx-log.sh /var/log/nginx/access.log nginx.access
-```
-
-スクリプトは指定ファイルを先頭から末尾まで読み込み、各行を `message` フィールドとして送信します。実行後に追記されたログを継続監視するものではありません。
