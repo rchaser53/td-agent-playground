@@ -163,3 +163,23 @@ sleep 2
 curl 'http://localhost:9200/_cat/indices?v'
 curl 'http://localhost:9200/nginx-access-*/_search?pretty'
 ```
+
+
+## 既存の nginx ログファイルを一括送信
+
+指定した nginx ログファイルに現在書かれている全ログを Fluentd の Forward 入力へ送信するスクリプトを用意しています。
+
+```bash
+docker compose cp /path/to/access.log fluentd:/tmp/access.log
+docker compose exec fluentd bash /workspace/scripts/send-nginx-log.sh /tmp/access.log
+```
+
+ホスト側からスクリプトを使う場合は、td-agent と同じ環境で `/opt/td-agent/bin/fluent-cat` が利用できる必要があります。
+
+第2引数で送信タグを指定できます。省略時は `nginx.access` です。
+
+```bash
+./scripts/send-nginx-log.sh /var/log/nginx/access.log nginx.access
+```
+
+スクリプトは指定ファイルを先頭から末尾まで読み込み、各行を `message` フィールドとして送信します。実行後に追記されたログを継続監視するものではありません。
